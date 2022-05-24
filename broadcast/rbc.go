@@ -1,4 +1,4 @@
-package broadcast
+package Broadcast
 
 import (
 	"bytes"
@@ -6,25 +6,38 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	feld "github.com/coinbase/kryptology/pkg/sharing"
 	rs "github.com/vivint/infectious"
-	//rs "github.com/klauspost/reedsolomon"
+
+	"gitlab.com/elktree/ecc"
 )
 
 var wg sync.WaitGroup
+var wg1 sync.WaitGroup
+
 var Output []string
 
-type fn func([]byte) bool
+//type fn func([]byte) bool
+type fn func(
+	sk *ecc.PrivateKey,
+	verifier *feld.FeldmanVerifier,
+	c []byte,
+	k, i int,
+	chans []chan Message) bool
+
 type Message struct {
-	sender  int
-	msgtype string
-	value   rs.Share //[]byte
-	hash    []byte
+	Sender  int
+	Msgtype string
+	Value   rs.Share
+	Hash    []byte
+	Output  []byte
 }
 
 type payload struct {
 	count int
-	val   rs.Share //[]byte
+	val   rs.Share
 	hash  []byte
 }
 
@@ -70,22 +83,20 @@ func Rs_dec(n int, k int, shares []rs.Share, f *rs.FEC) ([]byte, error) {
 	}
 }
 
-func Rbc(chans []chan Message, msg []byte) []string {
+func Rbc(priv []*ecc.PrivateKey,
+	verifier *feld.FeldmanVerifier,
+	chans []chan Message,
+	msg []byte,
+	n, f, leader int, //here f is the number of faulty parties
+	predicate fn) []string {
 
-	for i := 0; i < 7; i += 1 {
+	for i := 0; i < n; i += 1 {
 		wg.Add(1)
-		go Run_rbc(7, 2, chans[:], 0, msg, i, predicate)
+		go Run_rbc(n, f, chans[:], leader, msg, i, predicate, priv[i], verifier)
 	}
 	wg.Wait()
 
-	for _, c := range chans {
-		close(c)
-	}
 	return Output
-}
-
-func predicate(i []byte) bool {
-	return true
 }
 
 func hash(msg []byte) []byte {
@@ -93,7 +104,7 @@ func hash(msg []byte) []byte {
 	return sum[:]
 }
 
-func broadcast(ch []chan Message, msg Message) {
+func Broadcast(ch []chan Message, msg Message) {
 
 	for _, c := range ch {
 		go send(c, msg)
@@ -101,21 +112,33 @@ func broadcast(ch []chan Message, msg Message) {
 }
 
 func send(ch chan Message, msg Message) {
+
 	ch <- msg
 }
 
+//todo : recieve should only be available to  specific nodes
 func recieve(ch chan Message, x int) Message {
 	value := <-ch
 	return value
 }
 
-func Run_rbc(n int, f int, ch []chan Message, leader int, msg []byte, id int, predicate fn) error {
+func Run_rbc(
+	n int,
+	f int,
+	ch []chan Message,
+	leader int,
+	msg []byte,
+	id int,
+	predicate fn,
+	sk *ecc.PrivateKey,
+	verifier *feld.FeldmanVerifier) {
+
 	fmt.Println("Node -", id, "joined...")
 
 	//Constraints
-	if n < 3*f+1 || f < 0 || leader < 0 || leader > n || id < 0 || id > n {
+	if n < 3*f+1 || f < 0 || leader < 0 || leader > n || id < 0 || id > n || f < n/3 {
 		wg.Done()
-		return errors.New("Invalid parameter")
+		panic(errors.New("Invalid parameter"))
 	}
 
 	echo_list := make([]payload, n)
@@ -129,55 +152,63 @@ func Run_rbc(n int, f int, ch []chan Message, leader int, msg []byte, id int, pr
 	var fec *rs.FEC
 	var M_i []rs.Share
 	var err error
-	//leader broadcasts
+	//leader Broadcasts
 	if leader == id {
-		broadcast(ch, Message{id, "PROPOSE", rs.Share{Number: 0, Data: msg}, nil})
+		Broadcast(ch, Message{id, "PROPOSE", rs.Share{Number: 0, Data: msg}, nil, nil})
+
 	}
 
 	for {
 
 		text := recieve(ch[id], id)
-
-		if text.msgtype == "PROPOSE" {
+		if text.Msgtype == "PROPOSE" {
 			fmt.Println("Node", id, "Receiving propose message...")
 
-			if text.sender != leader {
+			if text.Sender != leader {
 				continue
-			} else if predicate(text.value.Data) {
-				h := hash(text.value.Data)
-				M_i, fec, err = Rs_enc(n, f+1, text.value.Data)
+			} else if predicate(sk, verifier, msg, f+1, id, ch) {
+				h := hash(text.Value.Data)
+
+				M_i, fec, err = Rs_enc(n, f+1, text.Value.Data)
+
 				if err != nil {
-					return err
+					panic(err)
 				}
 				for i := range ch {
-					go send(ch[i], Message{id, "ECHO", M_i[i], h})
+					go send(ch[i], Message{id, "ECHO", M_i[i], h, nil})
 				}
 
 			} else {
+				key, _ := sk.Marshal()
+				Broadcast(ch, Message{id, "IMPLICATE", rs.Share{}, nil, key})
+				fmt.Println("Invalid value by", id)
+				fmt.Println("Sending implicate message...")
+				time.Sleep(3 * time.Second)
+
 				wg.Done()
-				return errors.New("Invalid value")
+				return
 			}
 
-		} else if text.msgtype == "ECHO" {
+		} else if text.Msgtype == "ECHO" {
 			fmt.Println("Node", id, "Receiving echo messages...")
 			//Checking for redundant echo Messages
-			if echo_list[text.sender].count >= 1 {
+			if echo_list[text.Sender].count >= 1 {
 				continue
 			}
 
-			//storing echo Messages of each sender
-			echo_list[text.sender] = payload{1, text.value, text.hash}
+			//storing echo Messages of each Sender
+			echo_list[text.Sender] = payload{1, text.Value, text.Hash}
 
-			//Counting the identical echo Messages sent by different senders
+			//Counting the identical echo Messages sent by different Senders
 			key, flag := 0, false
 			if len(echo_counter) == 0 {
-				echo_counter[0] = echo_list[text.sender]
+				echo_counter[0] = echo_list[text.Sender]
 				flag = true
 			}
 			for i, v := range echo_counter {
-				if bytes.Compare(v.hash, text.hash) == 0 && bytes.Compare(v.val.Data, text.value.Data) == 0 && v.val.Number == text.value.Number {
+				if bytes.Compare(v.hash, text.Hash) == 0 && bytes.Compare(v.val.Data, text.Value.Data) == 0 && v.val.Number == text.Value.Number {
 					v.count++
-					echo_counter[i] = payload{v.count, text.value, text.hash}
+					echo_counter[i] = payload{v.count, text.Value, text.Hash}
 					key = i
 					flag = true
 					break
@@ -186,7 +217,7 @@ func Run_rbc(n int, f int, ch []chan Message, leader int, msg []byte, id int, pr
 			}
 
 			if flag == false {
-				echo_counter[len(echo_counter)] = echo_list[text.sender]
+				echo_counter[len(echo_counter)] = echo_list[text.Sender]
 			}
 
 			if echo_counter[key].count >= (f + 1) {
@@ -196,39 +227,41 @@ func Run_rbc(n int, f int, ch []chan Message, leader int, msg []byte, id int, pr
 			}
 			if echo_counter[key].count >= (2*f + 1) {
 				ready_sent = true
-				broadcast(ch, Message{id, "READY", echo_counter[key].val, echo_counter[key].hash})
+				Broadcast(ch, Message{id, "READY", echo_counter[key].val, echo_counter[key].hash, nil})
 
 			}
-		} else if text.msgtype == "READY" {
+		} else if text.Msgtype == "READY" {
 			fmt.Println("Node", id, "Receiving ready messages...")
 			//Checking for redundant Messages
-			if ready_list[text.sender].count >= 1 {
+			if ready_list[text.Sender].count >= 1 {
 				continue
 			}
-			//storing  Messages of each sender
-			ready_list[text.sender] = payload{1, text.value, text.hash}
+			//storing  Messages of each Sender
+			ready_list[text.Sender] = payload{1, text.Value, text.Hash}
 
 			//Storing (j , m_j) in T_h as T_h[j] = m_j
-			T_h = append(T_h, text.value)
+			T_h = append(T_h, text.Value)
 
 			//f+1 ready Messages and not having sent ready
 			if len(ready_list) >= (f+1) && ready_sent == false && len(ready_hash) != 0 && len(ready_val.Data) != 0 {
 				ready_sent = true
-				broadcast(ch, Message{id, "READY", ready_val, ready_hash})
+				Broadcast(ch, Message{id, "READY", ready_val, ready_hash, nil})
 			}
 
 			for i := 0; i < f; i += 1 {
 				if len(T_h) >= (2*f + 1 + i) {
 					M, err := Rs_dec(n, f+1, T_h, fec)
 					if err != nil {
-						return err
+						fmt.Println("here:", id)
+						panic(err)
 					}
 					if bytes.Compare(hash(M), ready_hash) == 0 {
-						fmt.Println("\n", id, "Outputed :", string(M))
+						go send(ch[id], Message{id, "OUTPUT", rs.Share{}, nil, M})
+						fmt.Println("\n", "node", id, "Outputed ")
 						//just for checking
 						Output = append(Output, string(M))
 						wg.Done()
-						return nil
+						return
 					}
 				}
 			}
@@ -238,66 +271,3 @@ func Run_rbc(n int, f int, ch []chan Message, leader int, msg []byte, id int, pr
 	}
 
 }
-
-/*
-rs for erasure coding
-func Rs_enc(msg []byte, n int, parity int) ([][]byte, error) {
-
-	if n < parity {
-		return nil, errors.New("Invalid parity or number of nodes")
-	}
-
-	enc, err := rs.New(n, parity)
-	if err != nil {
-		panic(err)
-	}
-	shards, err := enc.Split(msg)
-
-	// Encode the parity set
-	err = enc.Encode(shards)
-	if err != nil {
-		panic(err)
-	}
-
-	// Verify the parity set
-	ok, err := enc.Verify(shards)
-	if ok && err == nil {
-		//fmt.Println("Encoded")
-	}
-
-	return shards, nil
-}
-
-//TODO : Correct errors
-func Rs_dec(T [][]byte, parity int, n int) []byte {
-
-	enc, err := rs.New(n, parity)
-	if err != nil {
-		panic(err)
-	}
-	// Reconstruct the shards
-	_ = enc.Reconstruct(T)
-	//fmt.Println(err, T)
-
-	// Verify the data set
-	ok, err := enc.Verify(T)
-	if ok {
-		var b bytes.Buffer
-		err := enc.Join(&b, T, n)
-		msg := b.Bytes()
-		if err == nil {
-			for {
-				if msg[len(msg)-1] != 0 {
-					return msg
-				}
-				msg = msg[:(len(msg) - 1)]
-			}
-
-		} else {
-			panic(err)
-		}
-	} else {
-		panic(err)
-	}
-
-}*/

@@ -7,6 +7,10 @@ import (
 	"time"
 
 	br "github.com/GarryFCR/ADKG/broadcast"
+	acss "github.com/GarryFCR/ADKG/secret_sharing"
+	feld "github.com/coinbase/kryptology/pkg/sharing"
+
+	"gitlab.com/elktree/ecc"
 )
 
 var wg sync.WaitGroup
@@ -50,11 +54,24 @@ func TestRbc(t *testing.T) {
 	}
 
 	//Call rbc
-	output := br.Rbc(chans[:], msg)
+	sk, _ := acss.Generate(7)
+	verifier, _ := acss.FeldPolyCommit(7, 3, 0)
+	output := br.Rbc(sk, verifier, chans[:], msg, 7, 2, 0, predicate)
 	for _, o := range output {
 		if o != string(msg) {
 			t.Fatalf("Incorrect value was recieved from the broadcast")
 		}
 	}
+
+}
+
+func predicate(
+	sk *ecc.PrivateKey,
+	verifier *feld.FeldmanVerifier,
+	c []byte,
+	k, i int,
+	chans []chan br.Message) bool {
+
+	return true
 
 }
