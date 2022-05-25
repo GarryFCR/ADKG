@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	feld "github.com/coinbase/kryptology/pkg/sharing"
 	rs "github.com/vivint/infectious"
 
 	"gitlab.com/elktree/ecc"
@@ -22,7 +21,6 @@ var Output []string
 //type fn func([]byte) bool
 type fn func(
 	sk *ecc.PrivateKey,
-	verifier *feld.FeldmanVerifier,
 	c []byte,
 	k, i int,
 	chans []chan Message) bool
@@ -84,7 +82,6 @@ func Rs_dec(n int, k int, shares []rs.Share, f *rs.FEC) ([]byte, error) {
 }
 
 func Rbc(priv []*ecc.PrivateKey,
-	verifier *feld.FeldmanVerifier,
 	chans []chan Message,
 	msg []byte,
 	n, f, leader int, //here f is the number of faulty parties
@@ -92,7 +89,7 @@ func Rbc(priv []*ecc.PrivateKey,
 
 	for i := 0; i < n; i += 1 {
 		wg.Add(1)
-		go Run_rbc(n, f, chans[:], leader, msg, i, predicate, priv[i], verifier)
+		go Run_rbc(n, f, chans[:], leader, msg, i, predicate, priv[i])
 	}
 	wg.Wait()
 
@@ -131,7 +128,7 @@ func Run_rbc(
 	id int,
 	predicate fn,
 	sk *ecc.PrivateKey,
-	verifier *feld.FeldmanVerifier) {
+) {
 
 	fmt.Println("Node -", id, "joined...")
 
@@ -166,7 +163,7 @@ func Run_rbc(
 
 			if text.Sender != leader {
 				continue
-			} else if predicate(sk, verifier, msg, f+1, id, ch) {
+			} else if predicate(sk, msg, f+1, id, ch) {
 				h := hash(text.Value.Data)
 
 				M_i, fec, err = Rs_enc(n, f+1, text.Value.Data)
@@ -183,7 +180,7 @@ func Run_rbc(
 				Broadcast(ch, Message{id, "IMPLICATE", rs.Share{}, nil, key})
 				fmt.Println("Invalid value by", id)
 				fmt.Println("Sending implicate message...")
-				time.Sleep(3 * time.Second)
+				time.Sleep(5 * time.Second)
 
 				wg.Done()
 				return

@@ -54,7 +54,7 @@ func byte_2_shamirshare(ss []byte) *feld.ShamirShare {
 }
 func predicate(
 	sk *ecc.PrivateKey,
-	verifier *feld.FeldmanVerifier,
+	//verifier *feld.FeldmanVerifier,
 	c []byte,
 	k, i int, //threshold
 	chans []chan br.Message) bool {
@@ -64,9 +64,12 @@ func predicate(
 
 		return false
 	}
-
 	ss := byte_2_shamirshare(plaintext)
 
+	verifier, err := Get_verifier(k, c)
+	if err != nil {
+		return false
+	}
 	if verifier.Verify(ss) == nil {
 		return true
 	}
@@ -74,13 +77,30 @@ func predicate(
 
 }
 
-//todo: need to decode verifier from the broadcasted value
+func Get_verifier(k int, c []byte) (*feld.FeldmanVerifier, error) {
+
+	commitment := make([]curves.Point, 0)
+	//point := new(curves.PointK256)
+	for i := 0; i < k; i++ {
+		c_i, err := curves.K256().Point.FromAffineCompressed(c[i*33 : (i*33)+33])
+		if err == nil {
+			commitment = append(commitment, c_i)
+		} else {
+			return nil, err
+		}
+	}
+
+	verifier := new(feld.FeldmanVerifier)
+	verifier.Commitments = commitment
+	return verifier, nil
+}
+
 func Sharing_phase(
 	secret int,
 	n, k, leader uint32,
 	chans []chan br.Message,
 	priv []*ecc.PrivateKey,
-	pub []*ecc.PublicKey) ([]byte, *feld.FeldmanVerifier) {
+	pub []*ecc.PublicKey) []byte {
 
 	Verifier, Shares := FeldPolyCommit(n, k, secret)
 
@@ -96,36 +116,36 @@ func Sharing_phase(
 			if i+1 == 5 {
 				fmt.Println(s)
 				s1[len(s1)-1] = byte(0)
-			}*/
-		/////////////////////////////
+			}
+			/////////////////////////////*/
 		e, _ := pub[i].Encrypt(s1) //150 bytes
 		c = append(c, e[:]...)
 
 	}
 
-	output := br.Rbc(priv, Verifier, chans, c, int(n), int(k-1), int(leader), predicate)
+	output := br.Rbc(priv, chans, c, int(n), int(k-1), int(leader), predicate)
 
 	for _, o := range output {
 		if o != string(c) {
 			fmt.Println("Incorrect value was recieved from the broadcast")
 		}
 	}
-	return c, Verifier
+	return c
 }
 
 //todo: handle multiple implicate message
-//todo: extract c from the output message
 func implicate_phase(
 	i, k int,
 	chans chan br.Message,
 	pub []*ecc.PublicKey,
-	verifier *feld.FeldmanVerifier,
 	c []byte) (int, error) {
 
 	output := br.Message{Msgtype: "done"}
 	recovery := br.Message{Msgtype: "done"}
 	sender := make([]int, 2)
 	var done bool
+	verifier, _ := Get_verifier(k, c)
+
 	for {
 		done = false
 		select {
@@ -133,12 +153,11 @@ func implicate_phase(
 			if ok {
 				if x.Msgtype == "IMPLICATE" {
 					priv, _ := ecc.UnmarshalPrivateKey(x.Output)
-					if priv.Key.PublicKey.X.Cmp(*&pub[x.Sender].Key.X) == 0 && priv.Key.PublicKey.Y.Cmp(*&pub[x.Sender].Key.Y) == 0 && priv.Key.PublicKey.Curve == *&pub[x.Sender].Key.Curve {
+					if priv.Key.PublicKey.Equal(pub[x.Sender].Key) /* priv.Key.PublicKey.X.Cmp(*&pub[x.Sender].Key.X) == 0 && priv.Key.PublicKey.Y.Cmp(*&pub[x.Sender].Key.Y) == 0 && priv.Key.PublicKey.Curve == *&pub[x.Sender].Key.Curve */ {
 						pos := ((k * 33) + (x.Sender * 150))
 						plaintext, _ := priv.Decrypt(c[pos : pos+150])
 
 						ss := byte_2_shamirshare(plaintext)
-
 						if verifier.Verify(ss) != nil {
 							//Indication to start recovery
 							recovery = br.Message{
@@ -224,10 +243,11 @@ func recovery_phase1(chans []chan br.Message, i int, sk *ecc.PrivateKey) {
 func recovery_phase2(
 	n, k, share_id int,
 	chans chan br.Message,
-	c []byte,
-	verifier *feld.FeldmanVerifier) (*feld.ShamirShare, error) {
+	c []byte) (*feld.ShamirShare, error) {
 
 	Shares := make([][]byte, 0)
+	verifier, _ := Get_verifier(k, c)
+
 	done := false
 	//At this point only secretkey and/or output messages are there in the channels
 	for {
@@ -311,7 +331,7 @@ func recover_share(n, k, share_id int, shares [][]byte) (*feld.ShamirShare, erro
 
 }
 
-func reconstruct_phase1(k, id int, chans []chan br.Message, priv *ecc.PrivateKey, verifier *feld.FeldmanVerifier) {
+func reconstruct_phase1(k, id int, chans []chan br.Message, priv *ecc.PrivateKey) {
 
 	done := false
 	for {
@@ -323,7 +343,7 @@ func reconstruct_phase1(k, id int, chans []chan br.Message, priv *ecc.PrivateKey
 					pos := ((k * 33) + (x.Sender * 150))
 					plaintext, _ := priv.Decrypt(x.Output[pos : pos+150])
 					ss := byte_2_shamirshare(plaintext)
-
+					verifier, _ := Get_verifier(k, x.Output)
 					if verifier.Verify(ss) == nil {
 						br.Broadcast(chans, br.Message{
 							Sender:  x.Sender,
@@ -352,18 +372,20 @@ func reconstruct_phase2(
 	n, k, id int,
 	chans []chan br.Message,
 	priv *ecc.PrivateKey,
-	verifier *feld.FeldmanVerifier) {
+	c []byte) {
 
 	output := br.Message{Msgtype: "done"}
 	reconstruct := br.Message{Msgtype: "done"}
 	done := false
 	//At this point there is a reconstruct message and a output message
+	verifier, _ := Get_verifier(k, c)
 	for {
 		select {
 		case x, ok := <-chans[id]:
 			if ok {
 				if x.Msgtype == "RECONSTRUCT" {
 					ss := byte_2_shamirshare(x.Output)
+
 					if verifier.Verify(ss) == nil {
 						reconstruct = x
 
@@ -409,12 +431,13 @@ func reconstruct_phase2(
 func reconstruct_phase3(
 	n, k uint32,
 	chans chan br.Message,
-	verifier *feld.FeldmanVerifier) (curves.Scalar, error) {
+	c []byte) (curves.Scalar, error) {
 
 	//At this point the node that called for reconstruct  has  reconstruct messages and an output message
 	T := make([]*feld.ShamirShare, 0)
 	output := br.Message{Msgtype: "done"}
 	done := false
+	verifier, _ := Get_verifier(int(k), c)
 	for {
 		select {
 		case x, ok := <-chans:
@@ -449,26 +472,27 @@ func reconstruct_phase3(
 
 }
 
-func Acss(secret int, n, k, leader uint32, chans []chan br.Message) {
-	priv, pub := Generate(int(n))
+func Acss(secret int, n, k, leader uint32, chans []chan br.Message, priv []*ecc.PrivateKey, pub []*ecc.PublicKey) ([]byte, bool) {
 
 	//SHARING PHASE ----------------------------------------------------
 	fmt.Println("Sharing Phase------------------------------------------")
-	c, verifier := Sharing_phase(secret, n, k, leader, chans, priv, pub)
+	c := Sharing_phase(secret, n, k, leader, chans, priv, pub)
 
 	//IMPLICATION PHASE ------------------------------------------------
-	//Implicate phase needs to be done by all nodes
+	//Implicate phase needs to be done by all nodes , basically checking if there is an implicate message
+	fmt.Println("Implicate Phase--------------------------------------")
 	count := make(map[int]int)
 	for i := 0; i < int(n); i++ {
-		id, err := implicate_phase(i, int(k), chans[i], pub, verifier, c)
+		id, err := implicate_phase(i, int(k), chans[i], pub, c)
 		if err != nil {
 			count[id]++
 		}
 	}
 	//RECOVERY PHASE ----------------------------------------------------
-	if len(count) != 0 {
-		fmt.Println("Recovery Phase--------------------------------------")
+	if len(count) == 0 {
+		return c, true
 	}
+	fmt.Println("Recovery Phase--------------------------------------")
 	for pos, v := range count {
 		if v > int(k) {
 			//Check recovery message at all nodes
@@ -478,37 +502,42 @@ func Acss(secret int, n, k, leader uint32, chans []chan br.Message) {
 			}
 			wg.Wait()
 
-			//Let the node that didnt get the share run this part
-			share, err := recovery_phase2(int(n), int(k), pos+1, chans[pos], c, verifier)
+			//The node that needs to recover share run this
+			share, err := recovery_phase2(int(n), int(k), pos+1, chans[pos], c)
 			if err != nil {
 				panic(err)
 			} else {
-				fmt.Println(share)
+				fmt.Println("Recovered share of node ", pos, ":", share)
 			}
 
 		}
 	}
 
+	return c, false
+
+}
+func Acss_reconstruct(
+	c []byte,
+	n, k uint32,
+	id int,
+	chans []chan br.Message,
+	priv []*ecc.PrivateKey) (curves.Scalar, error) {
+
 	//RECONSTRUCT PHASE --------------------------------------------------
 	fmt.Println("Reconstruct Phase----------------------------------------")
 	//Send reconstruct message by node 3
-	reconstruct_phase1(int(k), 3, chans, priv[3], verifier)
+	fmt.Println("Node ", id, " calling for reconstruction...")
+	reconstruct_phase1(int(k), int(id), chans, priv[id])
 	//Start sharing of shares
 	for i := 0; i < int(n); i++ {
-		if i == 3 {
+		if i == id {
 			continue
 		}
 		wg.Add(1)
-		go reconstruct_phase2(int(n), int(k), i, chans, priv[i], verifier)
+		go reconstruct_phase2(int(n), int(k), i, chans, priv[i], c)
 	}
 	wg.Wait()
 	//Start reconstructing
-	result, err := reconstruct_phase3(n, k, chans[3], verifier)
-	if err == nil {
-		y := curves.K256().NewScalar().New(100) // 100 in scalar form
-		if result.Cmp(y) == 0 {
-			fmt.Println("Correct Reconstruction")
-		}
-	}
-
+	result, err := reconstruct_phase3(n, k, chans[id], c)
+	return result, err
 }
