@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/coinbase/kryptology/pkg/core/curves"
 	feld "github.com/coinbase/kryptology/pkg/sharing"
@@ -21,6 +20,7 @@ import (
 
 var wg sync.WaitGroup
 
+//Generate key pairs
 func Generate(n int) ([]*ecc.PrivateKey, []*ecc.PublicKey) {
 	// generating p256 keys for identification and encryption
 	privKeys := make([]*ecc.PrivateKey, n)
@@ -31,6 +31,7 @@ func Generate(n int) ([]*ecc.PrivateKey, []*ecc.PublicKey) {
 	return privKeys, pubKeys
 }
 
+//Generate Feldman commitment and shamir shares
 func FeldPolyCommit(n, k uint32, s int) (*feld.FeldmanVerifier, []*feld.ShamirShare) {
 
 	//Using secp256k curve for other operations
@@ -47,11 +48,15 @@ func FeldPolyCommit(n, k uint32, s int) (*feld.FeldmanVerifier, []*feld.ShamirSh
 	return feldcommit, shares
 
 }
+
+//Convert bytes to shamir shares
 func byte_2_shamirshare(ss []byte) *feld.ShamirShare {
 
 	return &feld.ShamirShare{Id: binary.BigEndian.Uint32(ss[:4]), Value: ss[4:]}
 
 }
+
+//predicate that needs to be satisfied in reliable broadcast
 func predicate(
 	sk *ecc.PrivateKey,
 	//verifier *feld.FeldmanVerifier,
@@ -77,6 +82,7 @@ func predicate(
 
 }
 
+//get the commitment from the broadcasted value(v||c in paper)  sharing phase
 func Get_verifier(k int, c []byte) (*feld.FeldmanVerifier, error) {
 
 	commitment := make([]curves.Point, 0)
@@ -114,10 +120,10 @@ func Sharing_phase(
 		//just to make an incorrect share of node 5
 		/*
 			if i+1 == 5 {
-				fmt.Println(s)
+				fmt.Println("Changing share of node", i, ":", s)
 				s1[len(s1)-1] = byte(0)
-			}
-			/////////////////////////////*/
+			}*/
+		/////////////////////////////
 		e, _ := pub[i].Encrypt(s1) //150 bytes
 		c = append(c, e[:]...)
 
@@ -134,6 +140,7 @@ func Sharing_phase(
 }
 
 //todo: handle multiple implicate message
+//checking if anyone got an incorrect shares throug an implicate message
 func implicate_phase(
 	i, k int,
 	chans chan br.Message,
@@ -197,6 +204,7 @@ func implicate_phase(
 
 }
 
+//Sharing private key if there is a recovery
 func recovery_phase1(chans []chan br.Message, i int, sk *ecc.PrivateKey) {
 
 	recovery := br.Message{Msgtype: "done"}
@@ -220,7 +228,7 @@ func recovery_phase1(chans []chan br.Message, i int, sk *ecc.PrivateKey) {
 							Value:   rs.Share{},
 							Hash:    nil,
 							Output:  priv})
-						time.Sleep(3 * time.Second)
+						//time.Sleep(3 * time.Second)
 					} else {
 						done = true
 					}
@@ -239,7 +247,7 @@ func recovery_phase1(chans []chan br.Message, i int, sk *ecc.PrivateKey) {
 
 }
 
-//nodes with no correct shares should run this
+//nodes with an incorrect share should run this
 func recovery_phase2(
 	n, k, share_id int,
 	chans chan br.Message,
@@ -278,6 +286,7 @@ func recovery_phase2(
 	return recover_share(n, k, share_id, Shares)
 }
 
+//Generate shamir share for a given node when we have threshold number of shares to regenerate the polynomial
 func recover_share(n, k, share_id int, shares [][]byte) (*feld.ShamirShare, error) {
 
 	if len(shares) < k {
@@ -331,6 +340,7 @@ func recover_share(n, k, share_id int, shares [][]byte) (*feld.ShamirShare, erro
 
 }
 
+//Send reconstruct message to all
 func reconstruct_phase1(k, id int, chans []chan br.Message, priv *ecc.PrivateKey) {
 
 	done := false
@@ -351,7 +361,7 @@ func reconstruct_phase1(k, id int, chans []chan br.Message, priv *ecc.PrivateKey
 							Value:   rs.Share{},
 							Hash:    nil,
 							Output:  plaintext /*share*/})
-						time.Sleep(3 * time.Second)
+						//time.Sleep(3 * time.Second)
 
 						done = true
 					}
@@ -367,7 +377,7 @@ func reconstruct_phase1(k, id int, chans []chan br.Message, priv *ecc.PrivateKey
 
 }
 
-//We make a change were we only send the share to the node that calls reconstruct
+//Sending share to the node that called reconstruct
 func reconstruct_phase2(
 	n, k, id int,
 	chans []chan br.Message,
@@ -428,6 +438,7 @@ func reconstruct_phase2(
 	wg.Done()
 }
 
+//Reconstruction of secret after collecting threshold shares
 func reconstruct_phase3(
 	n, k uint32,
 	chans chan br.Message,

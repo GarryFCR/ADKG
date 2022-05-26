@@ -14,7 +14,6 @@ import (
 )
 
 var wg sync.WaitGroup
-var wg1 sync.WaitGroup
 
 var Output []string
 
@@ -177,10 +176,11 @@ func Run_rbc(
 
 			} else {
 				key, _ := sk.Marshal()
+				time.Sleep(5 * time.Second)
+
 				Broadcast(ch, Message{id, "IMPLICATE", rs.Share{}, nil, key})
 				fmt.Println("Invalid value by", id)
 				fmt.Println("Sending implicate message...")
-				time.Sleep(5 * time.Second)
 
 				wg.Done()
 				return
