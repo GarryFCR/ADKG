@@ -50,7 +50,7 @@ func FeldPolyCommit(n, k uint32, s int) (*feld.FeldmanVerifier, []*feld.ShamirSh
 }
 
 //Convert bytes to shamir shares
-func byte_2_shamirshare(ss []byte) *feld.ShamirShare {
+func Byte_2_shamirshare(ss []byte) *feld.ShamirShare {
 
 	return &feld.ShamirShare{Id: binary.BigEndian.Uint32(ss[:4]), Value: ss[4:]}
 
@@ -69,7 +69,7 @@ func predicate(
 
 		return false
 	}
-	ss := byte_2_shamirshare(plaintext)
+	ss := Byte_2_shamirshare(plaintext)
 
 	verifier, err := Get_verifier(k, c)
 	if err != nil {
@@ -130,7 +130,6 @@ func Sharing_phase(
 	}
 
 	output := br.Rbc(priv, chans, c, int(n), int(k-1), int(leader), predicate)
-
 	for _, o := range output {
 		if o != string(c) {
 			fmt.Println("Incorrect value was recieved from the broadcast")
@@ -164,7 +163,7 @@ func implicate_phase(
 						pos := ((k * 33) + (x.Sender * 150))
 						plaintext, _ := priv.Decrypt(c[pos : pos+150])
 
-						ss := byte_2_shamirshare(plaintext)
+						ss := Byte_2_shamirshare(plaintext)
 						if verifier.Verify(ss) != nil {
 							//Indication to start recovery
 							recovery = br.Message{
@@ -266,7 +265,7 @@ func recovery_phase2(
 					priv, _ := ecc.UnmarshalPrivateKey(x.Output)
 					pos := ((k * 33) + (x.Sender * 150))
 					plaintext, _ := priv.Decrypt(c[pos : pos+150])
-					ss := byte_2_shamirshare(plaintext)
+					ss := Byte_2_shamirshare(plaintext)
 
 					if verifier.Verify(ss) == nil {
 						Shares = append(Shares, plaintext)
@@ -301,7 +300,7 @@ func recover_share(n, k, share_id int, shares [][]byte) (*feld.ShamirShare, erro
 	x := scalar.New(share_id)
 	for i, share := range shares {
 
-		shamir_share := byte_2_shamirshare(share)
+		shamir_share := Byte_2_shamirshare(share)
 		err := shamir_share.Validate(curve)
 		if err != nil {
 			return nil, err
@@ -336,7 +335,7 @@ func recover_share(n, k, share_id int, shares [][]byte) (*feld.ShamirShare, erro
 
 	var ss [4]byte
 	binary.BigEndian.PutUint32(ss[:], uint32(share_id))
-	return byte_2_shamirshare(append(ss[:], y.Bytes()...)), nil
+	return Byte_2_shamirshare(append(ss[:], y.Bytes()...)), nil
 
 }
 
@@ -352,7 +351,7 @@ func reconstruct_phase1(k, id int, chans []chan br.Message, priv *ecc.PrivateKey
 					chans[id] <- x
 					pos := ((k * 33) + (x.Sender * 150))
 					plaintext, _ := priv.Decrypt(x.Output[pos : pos+150])
-					ss := byte_2_shamirshare(plaintext)
+					ss := Byte_2_shamirshare(plaintext)
 					verifier, _ := Get_verifier(k, x.Output)
 					if verifier.Verify(ss) == nil {
 						br.Broadcast(chans, br.Message{
@@ -394,7 +393,7 @@ func reconstruct_phase2(
 		case x, ok := <-chans[id]:
 			if ok {
 				if x.Msgtype == "RECONSTRUCT" {
-					ss := byte_2_shamirshare(x.Output)
+					ss := Byte_2_shamirshare(x.Output)
 
 					if verifier.Verify(ss) == nil {
 						reconstruct = x
@@ -454,7 +453,7 @@ func reconstruct_phase3(
 		case x, ok := <-chans:
 			if ok {
 				if x.Msgtype == "RECONSTRUCT" {
-					ss := byte_2_shamirshare(x.Output)
+					ss := Byte_2_shamirshare(x.Output)
 					if verifier.Verify(ss) == nil {
 						T = append(T, ss)
 

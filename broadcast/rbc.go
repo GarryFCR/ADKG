@@ -86,6 +86,7 @@ func Rbc(priv []*ecc.PrivateKey,
 	n, f, leader int, //here f is the number of faulty parties
 	predicate fn) []string {
 
+	Output = make([]string, 0)
 	for i := 0; i < n; i += 1 {
 		wg.Add(1)
 		go Run_rbc(n, f, chans[:], leader, msg, i, predicate, priv[i])
@@ -158,7 +159,7 @@ func Run_rbc(
 
 		text := recieve(ch[id], id)
 		if text.Msgtype == "PROPOSE" {
-			fmt.Println("Node", id, "Receiving propose message...")
+			//fmt.Println("Node", id, "Receiving propose message...")
 
 			if text.Sender != leader {
 				continue
@@ -187,7 +188,7 @@ func Run_rbc(
 			}
 
 		} else if text.Msgtype == "ECHO" {
-			fmt.Println("Node", id, "Receiving echo messages...")
+			//fmt.Println("Node", id, "Receiving echo messages...")
 			//Checking for redundant echo Messages
 			if echo_list[text.Sender].count >= 1 {
 				continue
@@ -228,7 +229,7 @@ func Run_rbc(
 
 			}
 		} else if text.Msgtype == "READY" {
-			fmt.Println("Node", id, "Receiving ready messages...")
+			//fmt.Println("Node", id, "Receiving ready messages...")
 			//Checking for redundant Messages
 			if ready_list[text.Sender].count >= 1 {
 				continue
