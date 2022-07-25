@@ -206,7 +206,7 @@ func verify_NIZK(
 	for _, P := range input {
 		bs = append(bs, P.ToAffineCompressed()...)
 	}
-	if curves.K256().NewScalar().Hash(bs).Cmp(e) == 0 {
+	if curve.NewScalar().Hash(bs).Cmp(e) == 0 {
 		return true
 	}
 	return false
