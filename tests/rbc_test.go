@@ -7,9 +7,7 @@ import (
 	"time"
 
 	br "github.com/GarryFCR/ADKG/broadcast"
-	acss "github.com/GarryFCR/ADKG/secret_sharing"
-
-	"gitlab.com/elktree/ecc"
+	"github.com/coinbase/kryptology/pkg/core/curves"
 )
 
 var wg sync.WaitGroup
@@ -53,8 +51,7 @@ func TestRbc(t *testing.T) {
 	}
 
 	//Call rbc
-	sk, _ := acss.Generate(7)
-	output := br.Rbc(sk, chans[:], msg, 7, 2, 0, predicate)
+	output := br.Rbc(chans[:], msg, 7, 2, 0, 1, curves.K256(), curves.K256().NewIdentityPoint(), predicate, "")
 	for _, o := range output {
 		if o != string(msg) {
 			t.Fatalf("Incorrect value was recieved from the broadcast")
@@ -64,9 +61,10 @@ func TestRbc(t *testing.T) {
 }
 
 func predicate(
-	sk *ecc.PrivateKey,
+	x []byte,
 	c []byte,
 	k, i int,
+	curve *curves.Curve,
 	chans []chan br.Message) bool {
 
 	return true

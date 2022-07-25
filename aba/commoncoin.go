@@ -50,7 +50,7 @@ func Coin(
 				if x.Msgtype == "COIN" {
 					c_, z_, g_i_tilde_ := unpack(curve, x.Output)
 					//Generate the pubkey of the node that send the share using the previous commitment
-					g_i_ := get_pubkey(k, x.Sender, curve, T_j, commitment)
+					g_i_ := Get_pubkey(k, x.Sender, curve, T_j, commitment)
 
 					if verify(x.Sender, c_, z_, g_tilde, g_i_, g_i_tilde_, curve) {
 						coin_shares[x.Sender] = g_i_tilde_
@@ -113,7 +113,7 @@ func generate_msg(
 
 }
 
-func get_pubkey(
+func Get_pubkey(
 	k, id int, //t+1,id
 	curve *curves.Curve,
 	T_j []int,
@@ -154,7 +154,7 @@ func generate_proof(id int,
 	g_i := g.Mul(x_i)
 	g_i_tilde := g_tilde.Mul(x_i)
 
-	c := hash(g, h, g_tilde, h_tilde, g_i, g_i_tilde, curve)
+	c := Hash(g, h, g_tilde, h_tilde, g_i, g_i_tilde, curve)
 
 	//z = s + xi * c
 	z := x_i.MulAdd(c, s)
@@ -172,7 +172,7 @@ func verify(id int,
 
 	h_tilde := g_tilde.Mul(z).Sub(g_i_tilde.Mul(c))
 
-	c_ := hash(g, h, g_tilde, h_tilde, g_i, g_i_tilde, curve)
+	c_ := Hash(g, h, g_tilde, h_tilde, g_i, g_i_tilde, curve)
 
 	if c_.Cmp(c) == 0 {
 		return true
@@ -180,7 +180,7 @@ func verify(id int,
 	return false
 }
 
-func hash(
+func Hash(
 	g, h, g_tilde, h_tilde, g_i, g_i_tilde curves.Point,
 	curve *curves.Curve) curves.Scalar {
 

@@ -3,9 +3,12 @@ package aba
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 
 	br "github.com/GarryFCR/ADKG/broadcast"
+	"github.com/coinbase/kryptology/pkg/core/curves"
+	feld "github.com/coinbase/kryptology/pkg/sharing"
 	rs "github.com/vivint/infectious"
 )
 
@@ -122,15 +125,27 @@ func contains(s []int, e int) bool {
 }
 
 func Broadcast(ch []chan br.Message, msg br.Message) {
+	var wg sync.WaitGroup
 	for _, c := range ch {
-		c <- msg
-	}
+		wg.Add(1)
+		go func(x chan br.Message) {
+			x <- msg
+			defer wg.Done()
+		}(c)
 
+	}
+	wg.Wait()
+	return
 }
 
 func Propose(
-	vote, id, n, k, j int, //proposal,node id,number of parties,threshold numbers,aba number
-	chans []chan br.Message) (int, error) {
+	vote, id, n, k int, //proposal,node id,number of parties,threshold numbers,aba number
+	chans []chan br.Message,
+	curve *curves.Curve,
+	Sid int,
+	shares []*feld.ShamirShare,
+	T_j []int,
+	commitment map[int][]curves.Point) (int, error) {
 
 	if n < 3*k-2 {
 		panic(errors.New("Invalid parameter"))
@@ -158,6 +173,7 @@ func Propose(
 	values2 := make([]int, 0)
 
 	for {
+
 		r = +1
 		output := make([]byte, 0)
 		//bv broadcast1
@@ -166,7 +182,7 @@ func Propose(
 
 			set_estsent("EST1", r, est1, est_sent1)
 			output = []byte{byte(est1), byte(r)} //estimate || round no
-			br.Broadcast(chans, br.Message{Sender: id, Msgtype: "EST1", Value: rs.Share{}, Hash: nil, Output: output})
+			Broadcast(chans, br.Message{Sender: id, Msgtype: "EST1", Value: rs.Share{}, Hash: nil, Output: output})
 		}
 
 		for {
@@ -180,7 +196,7 @@ func Propose(
 		//sbv broadcast1
 
 		output = []byte{byte(w), byte(r)}
-		br.Broadcast(chans, br.Message{Sender: id, Msgtype: "AUX1", Value: rs.Share{}, Hash: nil, Output: output})
+		Broadcast(chans, br.Message{Sender: id, Msgtype: "AUX1", Value: rs.Share{}, Hash: nil, Output: output})
 
 		for {
 			bin_array = get_bin("BIN1", r, bin_values1)
@@ -279,12 +295,19 @@ func Propose(
 				return values2[0], nil
 			} else if values2[0] == 2 {
 				// call coin
-				fmt.Println("Call coin")
-				return 2, nil
+				fmt.Println("Calling coin")
+				coin_id := strconv.Itoa(Sid) + strconv.Itoa(r)
+				res := Coin(k, id, coin_id, curve, shares, T_j, commitment, chans)
+				if res == true {
+					return 1, nil
+				}
+				return 0, nil
+
 			}
 		} else if len(values2) == 2 {
 			est1 = values2[0]
 		}
+
 	}
 
 }
@@ -306,34 +329,38 @@ func recieve(
 		select {
 		case x, ok := <-chans[id]:
 			if ok {
-
-				v, r := int(x.Output[0]), int(x.Output[1])
-
 				//recieving bv broadcast1
 				if x.Msgtype == "EST1" {
+					v, r := int(x.Output[0]), int(x.Output[1])
 					estval_array := get("ESTVAL1", r, v, est_values1)
-					if contains(estval_array, x.Sender) && v != 0 && v != 1 {
+					if contains(estval_array, x.Sender) || v < 0 || v > 2 {
 						continue
 					}
 					set("ESTVAL1", r, v, x.Sender, est_values1)
+					estval_array = get("ESTVAL1", r, v, est_values1)
+
 					if len(estval_array) >= k && get_estsent("EST1", r, v, est_sent1) == false {
 						set_estsent("EST1", r, v, est_sent1)
 						output := []byte{byte(v), byte(r)}
-						br.Broadcast(chans, br.Message{Sender: id, Msgtype: "EST1", Value: rs.Share{}, Hash: nil, Output: output})
+						Broadcast(chans, br.Message{Sender: id, Msgtype: "EST1", Value: rs.Share{}, Hash: nil, Output: output})
 
 					}
+
 					if len(estval_array) >= (2*k-1) && contains(get_bin("BIN1", r, bin_values1), v) == false {
 						set_bin("BIN1", r, v, bin_values1)
 
 					}
 
 				} else if x.Msgtype == "AUX1" {
+					v, r := int(x.Output[0]), int(x.Output[1])
+
 					if contains(get("AUX1", r, v, aux_values1), x.Sender) && v != 0 && v != 1 {
 						continue
 					}
 					set("AUX1", r, v, x.Sender, aux_values1)
 
 				} else if x.Msgtype == "AUXSET" {
+					v, r := int(x.Output[0]), int(x.Output[1])
 
 					if contains(get("AUXSET", r, v, auxset_values), x.Sender) && v < 0 && v > 2 {
 						continue
@@ -341,8 +368,10 @@ func recieve(
 					set("AUXSET", r, v, x.Sender, auxset_values)
 
 				} else if x.Msgtype == "EST2" {
+					v, r := int(x.Output[0]), int(x.Output[1])
+
 					estval_array := get("ESTVAL2", r, v, est_values2)
-					if contains(estval_array, x.Sender) && v < 0 && v > 2 {
+					if contains(estval_array, x.Sender) || v < 0 || v > 2 {
 						continue
 					}
 					set("ESTVAL2", r, v, x.Sender, est_values2)
@@ -360,6 +389,8 @@ func recieve(
 					}
 
 				} else if x.Msgtype == "AUX2" {
+					v, r := int(x.Output[0]), int(x.Output[1])
+
 					if contains(get("AUX2", r, v, aux_values2), x.Sender) && v < 0 && v > 2 {
 						continue
 					}
