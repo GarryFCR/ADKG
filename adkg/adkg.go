@@ -189,7 +189,7 @@ func Adkg(
 	aba_check := make([]bool, n)
 	decision := make([]int, n)
 	T := make([]int, 0)
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 2; i++ { //reading only for two acss here just to test,since reading all n takes longer
 
 		share_byte, err := read(chans[i][id], "OUTPUT_SET")
 		if err != nil {

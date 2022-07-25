@@ -5,5 +5,4 @@ go 1.16
 require (
 	github.com/coinbase/kryptology v1.8.0
 	github.com/vivint/infectious v0.0.0-20200605153912-25a574ae18a3
-	gitlab.com/elktree/ecc v0.0.0-20190314182556-d86af7b58391
 )
