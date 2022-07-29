@@ -196,20 +196,25 @@ func verify_NIZK(
 
 	g := curve.NewGeneratorPoint()
 	s, _ := curve.Scalar.SetBytes(proof[:32])
-	e, _ := curve.Scalar.SetBytes(proof[32:])
-
-	a := g.Mul(s).Add(pk_i.Mul(e))
-	b := pk_d.Mul(s).Add(K_i.Mul(e))
+	r1, _ := curve.Point.FromAffineCompressed(proof[32:65])
+	r2, _ := curve.Point.FromAffineCompressed((proof[65:]))
 
 	bs := []byte{}
-	input := []curves.Point{g, pk_d, pk_i, K_i, a, b}
+	input := []curves.Point{g, pk_d, pk_i, K_i, r1, r2}
 	for _, P := range input {
 		bs = append(bs, P.ToAffineCompressed()...)
 	}
-	if curve.NewScalar().Hash(bs).Cmp(e) == 0 {
+
+	e := curve.NewScalar().Hash(bs)
+	a := g.Mul(s).Add(pk_i.Mul(e))
+	b := pk_d.Mul(s).Add(K_i.Mul(e))
+
+	if a.Equal(r1) && b.Equal(r2) {
 		return true
 	}
+
 	return false
+
 }
 
 func Sharing_phase(

@@ -194,10 +194,11 @@ func gen_NIZK(
 	s := Response(x, k, e)
 
 	public_inputs_byte := make([]byte, 0)
-	public_inputs_byte = append(public_inputs_byte, s.Bytes()...) // s is 32 bytes
-	public_inputs_byte = append(public_inputs_byte, e.Bytes()...) // e is 32 bytes
+	public_inputs_byte = append(public_inputs_byte, s.Bytes()...)                 // s is 32 bytes
+	public_inputs_byte = append(public_inputs_byte, r[0].ToAffineCompressed()...) // 33 bytes
+	public_inputs_byte = append(public_inputs_byte, r[1].ToAffineCompressed()...) // 33 bytes
 
-	// s,e
+	// s,r
 	return public_inputs_byte
 
 }

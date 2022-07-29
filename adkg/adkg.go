@@ -256,18 +256,19 @@ func keyDerive(
 	agree_Chans []chan br.Message) {
 
 	//Key derivation phase
+	// Chaum-Pedersen: prove: g^x = y1 && h^x = y2
 	Z_i := curve.Scalar.Zero()
 	for _, j := range T {
 		share_scalar, _ := curve.Scalar.SetBytes(S_i[j].Value)
-		Z_i = Z_i.Add(share_scalar)
+		Z_i = Z_i.Add(share_scalar) //x
 	}
 
-	g_zi := g.Mul(Z_i)
-	h_zi := h.Mul(Z_i)
+	g_zi := g.Mul(Z_i) // y1
+	h_zi := h.Mul(Z_i) // y2
 
 	k_rand := curve.Scalar.Random(rand.Reader)
-	A := g.Mul(k_rand)
-	B := h.Mul(k_rand)
+	A := g.Mul(k_rand) //g^k
+	B := h.Mul(k_rand) //h^k
 
 	//c=Hash(g,g_zi,h,h_zi,A,B)
 	C := aba.Hash(g, g_zi, h, h_zi, A, B, curve)
@@ -276,14 +277,17 @@ func keyDerive(
 	S := C.Mul(Z_i).Sub(k_rand)
 	S = S.Neg()
 
-	//Send (C,S)
+	//Send (S,A,B)
+	r := make([]byte, 0)
+	r = append(r, A.ToAffineCompressed()...) //33 bytes
+	r = append(r, B.ToAffineCompressed()...) //33 bytes
 	aba.Broadcast(agree_Chans, br.Message{
 		Sender:  int(id),
 		Sid:     int(id),
 		Msgtype: "PUBKEY_SHARE",
-		Value:   rs.Share{Number: 0, Data: h_zi.ToAffineCompressed()}, //pub key share,
-		Hash:    C.Bytes(),
-		Output:  S.Bytes()})
+		Value:   rs.Share{Number: 0, Data: h_zi.ToAffineCompressed()}, //pub key share, y2
+		Hash:    r,                                                    // A,B
+		Output:  S.Bytes()})                                           // S
 	time.Sleep(time.Second)
 
 	H := make(map[int]curves.Point)
@@ -293,11 +297,12 @@ func keyDerive(
 		case x, ok := <-agree_Chans[id]:
 			if ok {
 				if x.Msgtype == "PUBKEY_SHARE" {
-					g_zj := aba.Get_pubkey(int(k), x.Sender, curve, T, C_i)
+					g_zj := aba.Get_pubkey(int(k), x.Sender, curve, T, C_i) //y1
 
 					S_, err1 := curve.Scalar.SetBytes(x.Output)
-					C1, err2 := curve.Scalar.SetBytes(x.Hash)
-					h_zj, err3 := curve.Point.FromAffineCompressed(x.Value.Data)
+					A_, err2 := curve.Point.FromAffineCompressed(x.Hash[:33])    //g^k
+					B_, err3 := curve.Point.FromAffineCompressed(x.Hash[33:])    //h^k
+					h_zj, err4 := curve.Point.FromAffineCompressed(x.Value.Data) //y2
 
 					if err1 != nil {
 						panic(err1)
@@ -308,19 +313,21 @@ func keyDerive(
 					if err3 != nil {
 						panic(err1)
 					}
-					//A′=s*g + c*(g_zj)
-					a1 := g.Mul(S_)
-					a2 := g_zj.Mul(C1)
-					A_ := a1.Add(a2)
-
-					//B′=s*h +c*h_zj
-					b1 := h.Mul(S_)
-					b2 := h_zj.Mul(C1)
-					B_ := b1.Add(b2)
+					if err4 != nil {
+						panic(err1)
+					}
 
 					//c=Hash(g,g_zi,h,h_zi,A,B)
-					C2 := aba.Hash(g, g_zj, h, h_zj, A_, B_, curve)
-					if C1.Cmp(C2) == 0 {
+					C_ := aba.Hash(g, g_zj, h, h_zj, A_, B_, curve)
+
+					//A′=s*g + c*(g_zj)
+
+					A_dash := g.Mul(S_).Add(g_zj.Mul(C_))
+
+					//B′=s*h +c*h_zj
+					B_dash := h.Mul(S_).Add(h_zj.Mul(C_))
+
+					if A_.Equal(A_dash) && B_.Equal(B_dash) {
 						H[x.Sender] = h_zj
 					}
 				}
