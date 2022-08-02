@@ -189,25 +189,25 @@ func DecryptAES(key []byte, ciphertext []byte) []byte {
 	return ciphertext
 }
 
-func verify_NIZK(
-	pk_i, pk_d, K_i curves.Point,
+func Verify_NIZK(
+	g, y1, h, y2 curves.Point, //g, h, y1, y2, x := g, pk_d, pk_i, K_i, sk_i
 	curve *curves.Curve,
 	proof []byte) bool {
 
-	g := curve.NewGeneratorPoint()
+	//g := curve.NewGeneratorPoint()
 	s, _ := curve.Scalar.SetBytes(proof[:32])
 	r1, _ := curve.Point.FromAffineCompressed(proof[32:65])
 	r2, _ := curve.Point.FromAffineCompressed((proof[65:]))
 
 	bs := []byte{}
-	input := []curves.Point{g, pk_d, pk_i, K_i, r1, r2}
+	input := []curves.Point{g, h, y1, y2, r1, r2}
 	for _, P := range input {
 		bs = append(bs, P.ToAffineCompressed()...)
 	}
 
 	e := curve.NewScalar().Hash(bs)
-	a := g.Mul(s).Add(pk_i.Mul(e))
-	b := pk_d.Mul(s).Add(K_i.Mul(e))
+	a := g.Mul(s).Add(y1.Mul(e))
+	b := h.Mul(s).Add(y2.Mul(e))
 
 	if a.Equal(r1) && b.Equal(r2) {
 		return true
@@ -288,8 +288,9 @@ func implicate_phase(
 				if x.Msgtype == "IMPLICATE" {
 					K_i, _ := curve.Point.FromAffineCompressed(x.Output)
 					pk_i := pub[x.Sender]
+					g := curve.NewGeneratorPoint()
 
-					if verify_NIZK(pk_i, pk_d, K_i, curve, x.Hash) {
+					if Verify_NIZK(g, pk_i, pk_d, K_i, curve, x.Hash) {
 						pos := ((k * 33) + (x.Sender * 52))
 						key := sha256.Sum256(x.Output)
 						plaintext := DecryptAES(key[:], c[pos:pos+52])

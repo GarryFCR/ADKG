@@ -31,12 +31,14 @@ func Coin(
 	}
 
 	//Generate proof
-	c, z := generate_proof(id, curve, g_tilde, u_ji)
+	proof := generate_proof(id, curve, g_tilde, u_ji)
 
 	//Broadcast shares
-	//msg = (c, z , g_i_tilde)
-	msg := generate_msg(c, z, g_tilde.Mul(u_ji))
-
+	//msg = (z,h,h_tilde , g_i_tilde)
+	g_i_tilde := g_tilde.Mul(u_ji)
+	msg := make([]byte, 0)
+	msg = append(msg, proof[:]...)
+	msg = append(msg, g_i_tilde.ToAffineCompressed()...)
 	br.Broadcast(chans, br.Message{Sender: id, Msgtype: "COIN", Value: rs.Share{}, Hash: nil, Output: msg})
 
 	//wait for t+1 shares
@@ -48,11 +50,11 @@ func Coin(
 		case x, ok := <-chans[id]:
 			if ok {
 				if x.Msgtype == "COIN" {
-					c_, z_, g_i_tilde_ := unpack(curve, x.Output)
+					z_, h_, h_tilde_, g_i_tilde_ := unpack(curve, x.Output)
 					//Generate the pubkey of the node that send the share using the previous commitment
 					g_i_ := Get_pubkey(k, x.Sender, curve, T_j, commitment)
 
-					if verify(x.Sender, c_, z_, g_tilde, g_i_, g_i_tilde_, curve) {
+					if verify(z_, h_, h_tilde_, g_tilde, g_i_, g_i_tilde_, curve) {
 						coin_shares[x.Sender] = g_i_tilde_
 					}
 				} else {
@@ -91,26 +93,14 @@ func Coin(
 
 func unpack(
 	curve *curves.Curve,
-	msg []byte) (curves.Scalar, curves.Scalar, curves.Point) {
+	msg []byte) (curves.Scalar, curves.Point, curves.Point, curves.Point) {
 
-	c, _ := curve.Scalar.SetBytes(msg[0:32])
-	z, _ := curve.Scalar.SetBytes(msg[32:64])
-	g_i_tilde, _ := curve.Point.FromAffineCompressed(msg[64:97])
+	z, _ := curve.Scalar.SetBytes(msg[0:32])
+	h, _ := curve.Point.FromAffineCompressed(msg[32:65])
+	h_tilde, _ := curve.Point.FromAffineCompressed(msg[65:98])
+	g_i_tilde, _ := curve.Point.FromAffineCompressed(msg[98:131])
 
-	return c, z, g_i_tilde
-}
-
-func generate_msg(
-	c, z curves.Scalar,
-	g_i_tilde curves.Point) []byte {
-
-	msg := make([]byte, 0)
-	msg = append(msg, c.Bytes()...)
-	msg = append(msg, z.Bytes()...)
-	msg = append(msg, g_i_tilde.ToAffineCompressed()...)
-
-	return msg
-
+	return z, h, h_tilde, g_i_tilde
 }
 
 func Get_pubkey(
@@ -144,7 +134,7 @@ func Get_pubkey(
 func generate_proof(id int,
 	curve *curves.Curve,
 	g_tilde curves.Point,
-	x_i curves.Scalar) (curves.Scalar, curves.Scalar) {
+	x_i curves.Scalar) []byte {
 
 	s := curve.NewScalar().Random(rand.Reader)
 	g := curve.Point.Generator()
@@ -159,22 +149,29 @@ func generate_proof(id int,
 	//z = s + xi * c
 	z := x_i.MulAdd(c, s)
 
-	return c, z
+	proof := make([]byte, 0)
+	proof = append(proof, z.Bytes()...)                    // s is 32 bytes
+	proof = append(proof, h.ToAffineCompressed()...)       // 33 bytes
+	proof = append(proof, h_tilde.ToAffineCompressed()...) // 33 bytes
+
+	// z,h,h_tilde
+	return proof
+
 }
 
-func verify(id int,
-	c, z curves.Scalar,
-	g_tilde, g_i, g_i_tilde curves.Point,
+func verify(
+	z curves.Scalar,
+	h, h_tilde, g_tilde, g_i, g_i_tilde curves.Point,
 	curve *curves.Curve) bool {
 
 	g := curve.Point.Generator()
-	h := g.Mul(z).Sub(g_i.Mul(c))
-
-	h_tilde := g_tilde.Mul(z).Sub(g_i_tilde.Mul(c))
-
 	c_ := Hash(g, h, g_tilde, h_tilde, g_i, g_i_tilde, curve)
 
-	if c_.Cmp(c) == 0 {
+	h_ := g.Mul(z).Sub(g_i.Mul(c_))
+
+	h_tilde_ := g_tilde.Mul(z).Sub(g_i_tilde.Mul(c_))
+
+	if h.Equal(h_) && h_tilde.Equal(h_tilde_) {
 		return true
 	}
 	return false

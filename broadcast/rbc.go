@@ -162,9 +162,9 @@ func recieve(ch chan Message) Message {
 	return value
 }
 
-func gen_NIZK(
-	g, pk_i, pk_d, K_i curves.Point,
-	sk_i curves.Scalar) []byte { // maybe enforce specific curve points K256Point and scalar K256Scalar
+func Gen_NIZK(
+	g, y1, h, y2 curves.Point,
+	x curves.Scalar) []byte {
 
 	Commit := func(g, h curves.Point) ([]curves.Point, curves.Scalar) {
 		k := curves.K256().NewScalar().Random(rand.Reader)
@@ -181,7 +181,7 @@ func gen_NIZK(
 		return k.Sub(e.Mul(x))
 	}
 	// Chaum-Pedersen: prove: g^x = y1 && h^x = y2
-	g, h, y1, y2, x := g, pk_d, pk_i, K_i, sk_i
+	//g, h, y1, y2, x := g, pk_d, pk_i, K_i, sk_i
 	public_inputs := []curves.Point{g, h, y1, y2}
 	for _, P := range public_inputs { // check everything in curve.
 		if !P.IsOnCurve() { // are we checking it's a K256 curve or just generic?
@@ -277,7 +277,7 @@ func Run_rbc(
 
 				pk_i := Getpubk(curve, n)[id]
 				g := curve.NewGeneratorPoint()
-				proof_argument := gen_NIZK(g, pk_i, pk_d, K_i, sk_i)
+				proof_argument := Gen_NIZK(g, pk_i, pk_d, K_i, sk_i)
 				time.Sleep(5 * time.Second)
 
 				Broadcast(ch, Message{id, sid, "IMPLICATE", rs.Share{}, proof_argument, K_i.ToAffineCompressed()})

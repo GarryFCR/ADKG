@@ -154,6 +154,7 @@ func Repair(
 	id, n, k, sid int,
 	identities []int,
 	curve *curves.Curve,
+	final_commitment []curves.Point,
 	chans [][]chan br.Message,
 	out_chan []chan br.Message) *big.Int {
 
@@ -209,18 +210,37 @@ func Repair(
 		S = S.Add(s1.Mul(coeff[int(s.Id)]))
 	}
 
-	out_chan[id] <- br.Message{
-		Sender:  int(id),
-		Sid:     0,
-		Msgtype: "SHARE",
-		Value:   rs.Share{},
-		Hash:    nil,
-		Output:  S.Bytes()}
+	//Verify that the final share is the correct share of the secret
+	if verifyRepairshare(id, final_commitment, S.Bytes()) {
+		out_chan[id] <- br.Message{
+			Sender:  int(id),
+			Sid:     0,
+			Msgtype: "SHARE",
+			Value:   rs.Share{},
+			Hash:    nil,
+			Output:  S.Bytes()}
 
-	return S.BigInt()
+		return S.BigInt()
+	} else {
+		panic("INCORRECT SHARE FROM REPAIR")
+	}
+
 }
 
-func VerifyRepairshare() {
+func verifyRepairshare(
+	id int,
+	commitments []curves.Point,
+	share_value []byte) bool {
+
+	share := &feld.ShamirShare{Id: uint32(id + 1), Value: share_value}
+	verifier := new(feld.FeldmanVerifier)
+	verifier.Commitments = commitments[:]
+	if verifier.Verify(share) == nil {
+		return true
+
+	} else {
+		return false
+	}
 
 }
 

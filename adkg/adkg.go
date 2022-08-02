@@ -253,7 +253,7 @@ func keyDerive(
 	T []int,
 	S_i []*feld.ShamirShare,
 	C_i map[int][]curves.Point,
-	agree_Chans []chan br.Message) {
+	agree_Chans []chan br.Message) curves.Point {
 
 	//Key derivation phase
 	// Chaum-Pedersen: prove: g^x = y1 && h^x = y2
@@ -366,10 +366,10 @@ func keyDerive(
 		Sid:     0,
 		Msgtype: "SHARE",
 		Value:   rs.Share{},
-		Hash:    h_z.ToAffineCompressed(),
+		Hash:    nil,
 		Output:  Z_i.Bytes()}
 
-	return
+	return h_z
 
 }
 
@@ -377,7 +377,7 @@ func RunAdkg(n, k, id, sid uint32,
 	g, h curves.Point,
 	curve *curves.Curve,
 	chans [][]chan br.Message,
-	output_chans []chan br.Message) ([]int, map[int][]curves.Point) {
+	output_chans []chan br.Message) (curves.Point, []curves.Point) {
 
 	s, _ := rand.Int(rand.Reader, big.NewInt(int64(math.Pow(2, float64(32)))))
 	secret := curve.Scalar.New(int(s.Int64()))
@@ -385,6 +385,22 @@ func RunAdkg(n, k, id, sid uint32,
 	T, S_i, C_i := Adkg(n, k, id, sid, secret, curve, chans)
 	fmt.Println("KEY DERIVATION PHASE OF ADKG STARTED(NODE -", id, "):")
 
-	keyDerive(id, k, g, h, curve, T, S_i, C_i, output_chans)
-	return T, C_i
+	pubkey := keyDerive(id, k, g, h, curve, T, S_i, C_i, output_chans)
+
+	C := make(map[int][]curves.Point)
+	for _, i := range T {
+		C[i] = C_i[i]
+	}
+
+	commitment := make([]curves.Point, k)
+	for j := 0; j < int(k); j++ {
+		commitment[j] = curve.Point.Identity()
+	}
+	for _, v := range C {
+		for j := 0; j < int(k); j++ {
+			commitment[j] = commitment[j].Add(v[j])
+		}
+
+	}
+	return pubkey, commitment //commitment of final shares
 }

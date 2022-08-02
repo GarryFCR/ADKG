@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"sync"
 
@@ -48,7 +49,7 @@ func Gen_keypair(curve *curves.Curve, n int) {
 func call_adkg(
 	n, k int,
 	curve *curves.Curve,
-	out_chan []chan br.Message) ([]int, map[int][]curves.Point) {
+	out_chan []chan br.Message) []curves.Point {
 	var wg sync.WaitGroup
 
 	//A list of a list of channels - first index is sid second indicates the node
@@ -67,23 +68,36 @@ func call_adkg(
 	g := curve.Point.Generator()
 	x := curve.Scalar.Random(rand.Reader)
 	h := g.Mul(x)
-	var C map[int][]curves.Point
-	var T []int
+	share_commitment_list := make(map[int][]curves.Point)
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func(index int) {
-			T, C = adkg.RunAdkg(uint32(n), uint32(k), uint32(index), uint32(index), g, h, curve, chan_list[:], out_chan[:])
+			_, share_commitment_list[index] = adkg.RunAdkg(uint32(n), uint32(k), uint32(index), uint32(index), g, h, curve, chan_list[:], out_chan[:])
 			defer wg.Done()
 		}(i)
 
 	}
 	wg.Wait()
-	return T, C
+
+	Commitment := share_commitment_list[0]
+	count := 0
+	for _, v := range share_commitment_list {
+		if !reflect.DeepEqual(Commitment, v) {
+			count++
+		}
+	}
+	if count == 0 {
+		return Commitment
+
+	} else {
+		panic("COMMITMENTS ARE NOT EQUAL")
+	}
 }
 
 func call_repair(
 	lost_index, n, k int,
 	identities []int, //Group of nodes that will perform the enrollment
+	commitment []curves.Point,
 	curve *curves.Curve,
 	out_chan []chan br.Message) {
 
@@ -110,7 +124,7 @@ func call_repair(
 	wg.Wait()
 
 	//repair
-	share := adkg.Repair(lost_index, n, k, identities[0], identities, curve, chan_list, out_chan)
+	share := adkg.Repair(lost_index, n, k, identities[0], identities, curve, commitment, chan_list, out_chan)
 
 	fmt.Println()
 	fmt.Println("REPAIRED SHARE OF NODE -", lost_index, " IS :", share)
@@ -160,10 +174,10 @@ func main() {
 	curve := curves.K256()
 
 	Gen_keypair(curve, 7)
-	call_adkg(7, 3, curve, out_chan[:])
+	C := call_adkg(7, 3, curve, out_chan[:])
 	fmt.Println("REPAIRING NODE - 0's USING NODES - 2,3,4")
 
-	call_repair(0, 7, 3, []int{2, 3, 4}, curve, out_chan[:])
+	call_repair(0, 7, 3, []int{2, 3, 4}, C, curve, out_chan[:])
 	//call_disenroll(7, 3, T, C, curve, out_chan[:])
 
 }
